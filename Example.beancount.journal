@@ -1,0 +1,35 @@
+plugin "power_bohne.de_crypto_private" "st=Income:ST-PnL lt=Income:LT-PnL acc=Assets:Crypto,"
+
+2021-01-01 open Equity:Opening-Balances
+2021-01-01 open Assets:Crypto "FIFO"
+2021-01-01 open Assets:Cash
+2021-01-01 open Expenses:Fees
+2021-01-01 open Income:ST-PnL
+2021-01-01 open Income:LT-PnL
+
+
+2021-01-01 * "Start"
+    Assets:Cash                            10,000.00 EUR
+    Equity:Opening-Balances
+
+2021-08-04 * "Kraken" "ETH Purchase"
+    Assets:Cash                              -454.00 EUR
+    Assets:Crypto                               0.15 ETH {3,000.00 EUR}
+    Expenses:Fees
+
+2021-08-05 * "Kraken" "ETH Purchase"
+    Assets:Cash                              -778.20 EUR
+    Assets:Crypto                               0.275 ETH {2,800.00 EUR}
+    Expenses:Fees
+
+2021-11-18 * "Kraken" "ETH Purchase"
+    Assets:Cash                              -452.82 EUR
+    Assets:Crypto                               0.28125 ETH {1,600.00 EUR}
+    Expenses:Fees
+
+
+2022-10-01 * "Kraken" "Selling some"
+    Assets:Crypto                              -0.35 ETH {} ;; @1,350.00 EUR / ETH
+    Assets:Cash                               472.50 EUR
+    Expenses:Fees                               2.31 EUR
+    Income:LT-PnL
