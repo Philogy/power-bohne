@@ -71,19 +71,23 @@ def get_pnl(postings, sub_postings, total_net_gain):
 
 
 def validate_asset_postings(asset_postings, tx):
-    asset_currency = asset_postings[0].units.currency
+    asset_disposal_currency = None
+    asset_disposal_postings = []
     for asset_posting in asset_postings:
         error_loc_args = asset_posting.meta['filename'], asset_posting.meta['lineno'], tx
-        currency = asset_posting.units.currency
-        if asset_currency != currency:
-            return PluginError(
-                f'CurrencyMismatch: "{currency}" != "{asset_currency}"',
-                *error_loc_args
-            )
-        if asset_posting.units.number >= 0:
-            return PluginError(f'InvalidPosting: Not disposal', *error_loc_args)
-
-    return None
+        if asset_posting.units.number < 0:
+            currency = asset_posting.units.currency
+            if asset_disposal_currency is None:
+                asset_disposal_currency = currency
+            elif currency != asset_disposal_currency:
+                return None, PluginError(
+                    f'MultipleDisposals: Can only dispose of 1 currency per tx',
+                    *error_loc_args
+                )
+            asset_disposal_postings.append(asset_posting)
+    if asset_disposal_currency is None:
+        return None, PluginError('NoDisposals', tx.meta['filename'], tx.meta['lineno'], tx)
+    return asset_disposal_postings, None
 
 
 @curry
@@ -106,19 +110,23 @@ def tx_separator(unclassified, crypto_assets_accounts, tx):
         else:
             value_out_postings.append(posting)
 
-    if validation_error := validate_asset_postings(asset_postings, tx):
+    asset_disposal_postings, validation_error = validate_asset_postings(
+        asset_postings, tx)
+    if validation_error:
         return None, None, validation_error
 
     long_term_postings = []
     short_term_postings = []
-    for asset_posting in asset_postings:
+    for asset_posting in asset_disposal_postings:
         if (tx.date - asset_posting.cost.date).days >= 365:
             long_term_postings.append(asset_posting)
         else:
             short_term_postings.append(asset_posting)
 
-    lt_pnl = get_pnl(asset_postings, long_term_postings, net_gain_value)
-    st_pnl = get_pnl(asset_postings, short_term_postings, net_gain_value)
+    lt_pnl = get_pnl(asset_disposal_postings,
+                     long_term_postings, net_gain_value)
+    st_pnl = get_pnl(asset_disposal_postings,
+                     short_term_postings, net_gain_value)
 
     return st_pnl, lt_pnl, None
 
@@ -179,6 +187,7 @@ def de_crypto_private_core(entries, options_map, raw_config=None):
     crypto_assets_accounts = set(config['acc'])
     unclassified = config['unk']
 
+    # create separate_tx method
     separate_tx = tx_separator(unclassified, crypto_assets_accounts)
 
     for i, entry in enumerate(entries):
