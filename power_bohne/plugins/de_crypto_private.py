@@ -2,9 +2,17 @@ from functools import reduce
 from toolz import curry, compose
 from beancount.core.getters import get_entry_accounts
 from beancount.core.number import D
-from ..utils import parse_config, get_account_booking_methods, PluginError, Transaction
+from ..utils import parse_config, get_account_booking_methods, PluginError
 from beancount.core import amount, position
 from beancount.core.data import Booking, Transaction as _Transaction, Posting
+
+
+def Transaction(*args, **kwargs):
+    '''
+    silences "Transaction not callable error"
+    '''
+    assert callable(_Transaction), 'Transaction not callable'
+    return _Transaction(*args, **kwargs)
 
 
 def validate_config(entries, options_map, raw_config):
