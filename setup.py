@@ -20,7 +20,7 @@ setup(
     url='https://github.com/Philogy/power_bohne',
     # actual data
     entry_points={
-        'console_scripts': ['vib-bohne = vib_cli:main']
+        'console_scripts': ['vib-bohne = power_bohne.vib_cli:main']
     },
     install_requires=['toolz', 'beancount >= 2.0.0']
 )
