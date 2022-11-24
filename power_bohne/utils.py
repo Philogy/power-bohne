@@ -1,4 +1,14 @@
-from beancount.core.data import Open
+from beancount.core.data import Open, Transaction as _Transaction
+from beancount.core.number import D, Decimal
+
+
+def uncallable_callable(callable_obj):
+    def wrapper(*args, **kwargs):
+        return callable_obj(*args, **kwargs)
+    return wrapper
+
+
+Transaction = uncallable_callable(_Transaction)
 
 
 def parse_config_value(value):
