@@ -25,6 +25,12 @@ def parse_config(config):
     return parsed_config
 
 
+def safe_D(inp, assert_error='') -> Decimal:
+    from_d = D(inp)
+    assert isinstance(from_d, Decimal), assert_error
+    return from_d
+
+
 def get_account_booking_methods(entries):
     accounts = dict()
     for entry in entries:
