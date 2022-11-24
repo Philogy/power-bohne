@@ -1,10 +1,18 @@
-from .utils import parse_config, get_account_booking_methods, PluginError
-from beancount.core import amount, position
-from beancount.core.data import Booking, Transaction, Posting
-from beancount.core.number import D
-from beancount.core.getters import get_entry_accounts
-from toolz import curry, compose
 from functools import reduce
+from toolz import curry, compose
+from beancount.core.getters import get_entry_accounts
+from beancount.core.number import D
+from ..utils import parse_config, get_account_booking_methods, PluginError
+from beancount.core import amount, position
+from beancount.core.data import Booking, Transaction as _Transaction, Posting
+
+
+def Transaction(*args, **kwargs):
+    '''
+    silences "Transaction not callable error"
+    '''
+    assert callable(_Transaction), 'Transaction not callable'
+    return _Transaction(*args, **kwargs)
 
 
 def validate_config(entries, options_map, raw_config):
@@ -192,7 +200,7 @@ def de_crypto_private_core(entries, options_map, raw_config=None):
 
     for i, entry in enumerate(entries):
         accounts = set(get_entry_accounts(entry))
-        if not isinstance(entry, Transaction)\
+        if not isinstance(entry, _Transaction)\
                 or unclassified not in accounts\
                 or not (crypto_assets_accounts & accounts):
             continue
