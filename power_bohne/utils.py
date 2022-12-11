@@ -25,7 +25,9 @@ def parse_config(config):
     return parsed_config
 
 
-def safe_D(inp, assert_error='') -> Decimal:
+def safe_D(inp, assert_error=None) -> Decimal:
+    if assert_error is None:
+        assert_error = f'{inp} not convertible to decimal'
     from_d = D(inp)
     assert isinstance(from_d, Decimal), assert_error
     return from_d
