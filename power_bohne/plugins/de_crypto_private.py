@@ -166,13 +166,23 @@ def insert_pnls(entry, st_pnl, lt_pnl, config):
             unclassified_posting.meta
         ))
 
+    if lt_pnl.number == 0 and st_pnl.number == 0:
+        new_postings.append(Posting(
+            unclassified,
+            amount.Amount(D('0'), lt_pnl.currency),
+            None,
+            None,
+            unclassified_posting.flag,
+            unclassified_posting.meta
+        ))
+
     new_entry = Transaction(
         entry.meta,
         entry.date,
         entry.flag,
         entry.payee,
         entry.narration,
-        entry.tags | frozenset({'power_bohne/de_crypto_private/disposal'}),
+        entry.tags | frozenset({f'{__name__}/disposal'}),
         entry.links,
         new_postings
     )
