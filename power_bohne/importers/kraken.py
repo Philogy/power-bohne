@@ -1,6 +1,7 @@
 import re
 import csv
 import json
+import requests
 from collections import Counter, defaultdict
 from itertools import groupby
 from datetime import datetime
@@ -11,9 +12,10 @@ from beancount.ingest.importer import ImporterProtocol
 from beancount.core.amount import Amount
 from beancount.core.data import new_metadata, Cost, Posting
 
-from ..utils import Transaction, safe_D
+from ..utils import Transaction, safe_D, FileCache
 from .importer_utils import MissedInstanceTracker
 from .crypto_assets import ASSET_TYPES, AssetType
+from ..price import kraken
 
 import logging
 
@@ -42,7 +44,8 @@ KRAKEN_ASSET_REMAP = {
 class Importer(ImporterProtocol):
 
     def __init__(self, base_currency, cash_acc, net_cash_in, fiat_acc, stables_acc, crypto_acc,
-                 withdrawal_fees, crypto_pnl, forex_pnl, kraken_payee='Kraken', log_level=logging.INFO):
+                 withdrawal_fees, crypto_pnl, forex_pnl, kraken_payee='Kraken',
+                 log_level=logging.INFO, file_dest_root='exports/kraken', explicit_ignore=None):
         self.logger = logging.getLogger(__name__)
         self.logger.setLevel(log_level)
 
@@ -57,22 +60,23 @@ class Importer(ImporterProtocol):
         self.forex_pnl_acc = forex_pnl
         self.payee = kraken_payee
 
+        self.file_dest_root = file_dest_root
+        self.explicit_ignore = set() if explicit_ignore is None else explicit_ignore
+
         self.unrecognized_assets = defaultdict(int)
-        self.uncaught_deposits = MissedInstanceTracker()
-        self.uncaught_withdrawals = MissedInstanceTracker()
+        self.sell_price_cache = FileCache('importer.kraken/sell-price.json')
 
     def name(self) -> str:
         return 'Kraken'
 
     def identify(self, file) -> bool:
         return bool(
-            re.match('ledgers.csv', path.basename(file.name))
+            re.search(r'ledgers.*\.csv', path.basename(file.name))
             and re.match(KRAKEN_CSV_HEADER, file.head())
         )
 
-    def file_account(self, file):
-        print('file:', file)
-        return 'blobo'
+    def file_account(self, _):
+        return self.file_dest_root
 
     def create_base_posting(self, account, num, meta):
         return Posting(
@@ -119,8 +123,6 @@ class Importer(ImporterProtocol):
             ]
             skip = False
         else:
-            self.uncaught_deposits.add_amount(asset, amount)
-            self.uncaught_deposits.add_instance(deposit)
             postings = []
             skip = True
 
@@ -150,6 +152,34 @@ class Importer(ImporterProtocol):
         else:
             self.logger.error(f'Unrecognized AssetType {asset_type}')
 
+    def get_sell_price(self, asset, dt):
+        timestamp = int(dt.timestamp())
+        pair = f'{asset}{self.base_currency}'
+        if (cached_price := self.sell_price_cache[(pair, timestamp)]) is not None:
+            return safe_D(cached_price)
+        since = timestamp - 150
+        trades, errors = kraken.get_trades(pair, since)
+        if errors:
+            self.logger.error(f'Kraken Trades API returned errors: {errors}')
+            return None
+        sells = [
+            trade
+            for trade in trades
+            if trade['trade_dir'] == kraken.TradeDirection.Sell
+        ]
+        if not sells:
+            self.logger.error(
+                f'Kraken returned no sells for {pair} (since: {since})'
+            )
+            return None
+
+        best_sell = min(
+            sells,
+            key=lambda sell: abs(sell['time'].timestamp() - timestamp)
+        )
+        self.sell_price_cache[(pair, timestamp)] = float(best_sell['price'])
+        return best_sell['price']
+
     def __get_withdrawal_postings(self, withdrawal, meta):
         if (asset := self.__parse_kraken_asset(withdrawal['asset'])) is None:
             return [], None, False
@@ -165,9 +195,26 @@ class Importer(ImporterProtocol):
             ]
             skip = False
         else:
-            self.uncaught_withdrawals.add_amount(asset, amount)
-            self.uncaught_withdrawals.add_instance(withdrawal)
-            postings = []
+            if (price := self.get_sell_price(asset, withdrawal['date'])) is None:
+                return [], None, False
+            if (pnl_account := self.get_pnl_account(asset)) is None:
+                return [], None, False
+            if (asset_account := self.get_asset_account(asset)) is None:
+                return [], None, False
+            postings = [
+                Posting(
+                    asset_account,
+                    Amount(-fee, asset),
+                    Cost(None, None, None, None),
+                    None,
+                    None,
+                    meta
+                ),
+                self.create_base_posting(
+                    self.withdrawal_fee_acc, fee * price, meta
+                ),
+                Posting(pnl_account, None, None, None, None, meta)
+            ]
             skip = amount == safe_D('0')
 
         return postings, 'Withdrawal', skip
@@ -215,10 +262,20 @@ class Importer(ImporterProtocol):
             ]
         return postings, f'Trade', False
 
+    def mark_potential_income(self, deposit, refid):
+        asset = self.__parse_kraken_asset(deposit['asset'])
+        self.logger.info(
+            f'Potential Income   [{deposit["date"]}] {refid}: {asset:5} {deposit["amount"]}'
+        )
+
+    def mark_potential_disposal(self, withdrawal, refid):
+        asset = self.__parse_kraken_asset(withdrawal['asset'])
+        self.logger.info(
+            f'Potential Disposal [{withdrawal["date"]}] {refid}: {asset:5} {withdrawal["amount"]}'
+        )
+
     def extract(self, file, _=None) -> list:
         self.unrecognized_assets = defaultdict(int)
-        self.uncaught_deposits.reset()
-        self.uncaught_withdrawals.reset()
 
         with open(file.name, 'r', encoding='utf-8') as _file:
             transactions = list(csv.DictReader(_file))
@@ -233,6 +290,10 @@ class Importer(ImporterProtocol):
             pass
 
         for refid, transfers in transactions_by_ref:
+            if refid in self.explicit_ignore:
+                self.logger.debug(f'Skipping {refid}')
+                continue
+
             transfers = list(transfers)
             meta = new_metadata(file.name, None)
             date = datetime.strptime(
@@ -248,8 +309,10 @@ class Importer(ImporterProtocol):
                     raise Exception(
                         f'Unexpected transfer set: {json.dumps(transfers)}'
                     )
+                deposit = transfers[-1]
+                self.mark_potential_income(deposit, refid)
                 postings, narration, skip = self.__get_deposit_postings(
-                    transfers[-1],
+                    deposit,
                     meta
                 )
             elif ttype == 'withdrawal':
@@ -257,9 +320,10 @@ class Importer(ImporterProtocol):
                     raise Exception(
                         f'Unexpected transfer set: {json.dumps(transfers)}'
                     )
-
+                withdrawal = transfers[-1]
+                self.mark_potential_disposal(withdrawal, refid)
                 postings, narration, skip = self.__get_withdrawal_postings(
-                    transfers[-1],
+                    withdrawal,
                     meta
                 )
             elif ttype == 'trade':
@@ -280,7 +344,10 @@ class Importer(ImporterProtocol):
                 continue
 
             tx = Transaction(
-                new_metadata(file.name, None, {'txref': refid}),
+                new_metadata(file.name, None, {
+                    'txref': refid,
+                    'time': date.strftime('%H:%M:%S')
+                }),
                 date.date(),
                 '*',  # flag
                 self.payee,
@@ -301,23 +368,15 @@ class Importer(ImporterProtocol):
                 f'Unrecognized asset "{asset}" (instances: {instances})'
             )
 
-        for uncaught_deposit in self.uncaught_deposits:
-            self.logger.info(
-                f'Uncaught deposit: ({uncaught_deposit["refid"]}@{uncaught_deposit["time"]}) {uncaught_deposit["amount"]} {uncaught_deposit["asset"]}'
-            )
-        for asset, amount in self.uncaught_deposits.totals.items():
-            self.logger.info(
-                f'Unaccounted deposits (total) {asset}: {amount:,}'
-            )
-        for uncaught_withdrawal in self.uncaught_withdrawals:
-            self.logger.info(
-                f'Uncaught withdrawal: ({uncaught_withdrawal["refid"]}@{uncaught_withdrawal["time"]}) {uncaught_withdrawal["amount"]} {uncaught_withdrawal["asset"]}'
-            )
-        for asset, amount in self.uncaught_withdrawals.totals.items():
-            self.logger.info(
-                f'Unaccounted withdrawals (total) {asset}: {amount:,}'
-            )
-
         self.logger.info(f'Total entries: {len(entries)}')
 
+        self.sell_price_cache.save()
+
         return entries
+
+
+if __name__ == '__main__':
+    res = requests.get(
+        'https://api.kraken.com/0/public/Trades?pair=XMREUR&since=1595840660'
+    ).json()
+    print(f'res: {res}')

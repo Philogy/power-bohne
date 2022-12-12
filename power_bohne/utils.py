@@ -1,3 +1,5 @@
+import os
+import json
 from beancount.core.data import Open, Transaction as _Transaction
 from beancount.core.number import D, Decimal
 
@@ -50,3 +52,43 @@ class PluginError(Exception):
         self.source = {'filename': filename, 'lineno': lineno}
         self.message = message
         self.entry = entry
+
+
+class FileCache:
+    CACHE_FOLDER = '.power_bohne_cache'
+
+    def __init__(self, fp):
+        self.fp = fp
+        self.mem_cache = dict()
+        self.load()
+
+    def load(self):
+        full_path = os.path.join(self.CACHE_FOLDER, self.fp)
+        self.mem_cache = dict()
+        if not os.path.exists(full_path):
+            os.makedirs(os.path.dirname(full_path), exist_ok=True)
+        else:
+            with open(full_path, 'r') as f:
+                try:
+                    cache_items = json.load(f)
+                    self.mem_cache = dict([
+                        (tuple(key) if isinstance(key, list) else key, value)
+                        for key, value in cache_items
+                    ])
+                except json.decoder.JSONDecodeError:
+                    with open(full_path, 'w') as fw:
+                        fw.write('')  # wipe cache
+        return self.mem_cache
+
+    def get(self, key):
+        return self.mem_cache.get(key)
+
+    def __getitem__(self, key):
+        return self.mem_cache.get(key)
+
+    def __setitem__(self, key, value):
+        self.mem_cache[key] = value
+
+    def save(self):
+        with open(os.path.join(self.CACHE_FOLDER, self.fp), 'w') as f:
+            json.dump(list(self.mem_cache.items()), f)
