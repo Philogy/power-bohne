@@ -13,7 +13,6 @@ from beancount.core.amount import Amount
 from beancount.core.data import new_metadata, Cost, Posting
 
 from ..utils import Transaction, safe_D, FileCache
-from .importer_utils import MissedInstanceTracker
 from .crypto_assets import ASSET_TYPES, AssetType
 from ..price import kraken
 
@@ -352,7 +351,7 @@ class Importer(ImporterProtocol):
                 '*',  # flag
                 self.payee,
                 narration,
-                frozenset({'power_bohne.importers/kraken'}),  # tags
+                frozenset({__name__, 'kraken'}),  # tags
                 frozenset(),  # links
                 postings
             )
