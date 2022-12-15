@@ -59,6 +59,14 @@ def get_historic_lin_avg_price(coin_id, vs_currency, time):
     return get_lin_avg_price(prices, time)
 
 
+def get_ticker(coin_id):
+    res = get(f'v3/coins/{coin_id}/tickers', order='volume_desc')
+    for ticker in res['tickers']:
+        if ticker['trust_score'] == 'green':
+            return ticker['base']
+    raise ValueError(f'No trustworthy ticker found for "{coin_id}"')
+
+
 if __name__ == '__main__':
     target = datetime.now().timestamp() - 2 * 365 * 24 * 60 * 60
     print(f'datetime.fromtimestamp(target): {datetime.fromtimestamp(target)}')
