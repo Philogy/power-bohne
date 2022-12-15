@@ -5,27 +5,31 @@ from .gecko import gecko
 
 
 COMMAND_ALIASES = {
-    **metaquery.aliases
+    **metaquery.aliases,
+    **gecko.aliases
 }
 
 COMMANDS = {
-    metaquery.name: metaquery.core_command
+    metaquery.name: metaquery.core_command,
+    gecko.name: gecko.core_command
     # 'eth-tx': Command(add_evm_transaction_parser, parse_eth_scan_export)
 }
 
 
 def main():
     parser = argparse.ArgumentParser(description='Business beancount tools')
-    parser.add_argument('filepath')
 
     all_aliases = defaultdict(list)
     for alias, cmd in COMMAND_ALIASES.items():
         all_aliases[cmd].append(alias)
 
     subparsers = parser.add_subparsers(dest='command')
-    for cmd, aliases in all_aliases.items():
-        subparser = subparsers.add_parser(cmd, aliases=aliases)
-        COMMANDS[cmd].parser_add(subparser)
+    for cmd_name, cmd in COMMANDS.items():
+        subparser = subparsers.add_parser(
+            cmd_name,
+            aliases=all_aliases[cmd_name]
+        )
+        cmd.parser_add(subparser)
 
     args = parser.parse_args()
     cmd_alias = args.command

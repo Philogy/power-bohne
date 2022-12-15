@@ -49,14 +49,14 @@ def get_price_over_range(coin_id, vs_currency, start, end):
 HISTORIC_LIN_RADIUS = 5 * 24 * 60 * 60
 
 
-def get_historic_lin_avg_price(coin_id, vs_currency, timestamp):
+def get_historic_lin_avg_price(coin_id, vs_currency, time):
     prices = get_price_over_range(
         coin_id,
         vs_currency,
-        timestamp - HISTORIC_LIN_RADIUS,
-        timestamp + HISTORIC_LIN_RADIUS
+        time.timestamp() - HISTORIC_LIN_RADIUS,
+        time.timestamp() + HISTORIC_LIN_RADIUS
     )
-    return get_lin_avg_price(prices, datetime.fromtimestamp(timestamp))
+    return get_lin_avg_price(prices, time)
 
 
 if __name__ == '__main__':

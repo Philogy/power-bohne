@@ -86,17 +86,18 @@ def meta_query(args):
             print(res_str)
 
 
-def add_meta_query_parser(parser_meta_query):
-    parser_meta_query.add_argument('expression', type=str)
-    parser_meta_query.add_argument('-t', '--match-tags', action='store_true')
-    parser_meta_query.add_argument('-l', '--match-links', action='store_true')
-    parser_meta_query.add_argument('-a', '--show-tags', action='store_true')
-    parser_meta_query.add_argument('-i', '--show-links', action='store_true')
-    parser_meta_query.add_argument('-d', '--show-date', action='store_true')
-    parser_meta_query.add_argument('-p', '--show-payee', action='store_true')
-    parser_meta_query.add_argument('-n', '--show-narration',
-                                   action='store_true')
-    parser_meta_query.add_argument('-e', '--show-entry', action='store_true')
+def add_meta_query_parser(parser):
+    parser.add_argument('filepath')
+    parser.add_argument('expression', type=str)
+    parser.add_argument('-t', '--match-tags', action='store_true')
+    parser.add_argument('-l', '--match-links', action='store_true')
+    parser.add_argument('-a', '--show-tags', action='store_true')
+    parser.add_argument('-i', '--show-links', action='store_true')
+    parser.add_argument('-d', '--show-date', action='store_true')
+    parser.add_argument('-p', '--show-payee', action='store_true')
+    parser.add_argument('-n', '--show-narration',
+                        action='store_true')
+    parser.add_argument('-e', '--show-entry', action='store_true')
 
 
 metaquery = Command(
