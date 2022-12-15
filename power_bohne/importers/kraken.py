@@ -14,7 +14,7 @@ from beancount.core.data import new_metadata, Cost, Posting
 
 from ..utils import Transaction, safe_D, FileCache
 from .crypto_assets import ASSET_TYPES, AssetType
-from ..price import kraken
+from ..prices import kraken
 
 import logging
 
