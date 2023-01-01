@@ -128,6 +128,14 @@ def tx_separator(unclassified, crypto_assets_accounts, tx):
     st_pnl = get_pnl(asset_disposal_postings,
                      short_term_postings, net_gain_value)
 
+    # if there was a tiny rounding error somehow shove into long-term account
+    remainder = amount.sub(net_gain_value, amount.add(lt_pnl, st_pnl))
+    if remainder.number != 0:
+        if lt_pnl.number == 0:
+            st_pnl = amount.add(st_pnl, remainder)
+        else:
+            lt_pnl = amount.add(lt_pnl, remainder)
+
     return st_pnl, lt_pnl, None
 
 
