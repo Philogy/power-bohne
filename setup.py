@@ -22,5 +22,5 @@ setup(
     entry_points={
         'console_scripts': ['vib-bohne = power_bohne.vib_cli:main']
     },
-    install_requires=['toolz', 'beancount >= 2.0.0']
+    install_requires=['toolz', 'beancount >= 2.0.0', 'python-dotenv']
 )
