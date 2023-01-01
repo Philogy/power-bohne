@@ -1,3 +1,4 @@
+import re
 import json
 import requests
 from decimal import Decimal
@@ -60,10 +61,10 @@ def get_historic_lin_avg_price(coin_id, vs_currency, time):
 
 
 def get_ticker(coin_id):
-    res = get(f'v3/coins/{coin_id}/tickers', order='volume_desc')
-    for ticker in res['tickers']:
-        if ticker['trust_score'] == 'green':
-            return ticker['base']
+    res = get(f'v3/coins/list', include_platform=True)
+    for asset in res:
+        if asset['id'] == coin_id:
+            return asset['symbol'].upper()
     raise ValueError(f'No trustworthy ticker found for "{coin_id}"')
 
 
