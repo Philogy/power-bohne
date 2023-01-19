@@ -11,7 +11,6 @@ def add_gecko_parser(parser):
     parser.add_argument('-c', '--precision-currency', default=3, type=int)
     parser.add_argument('-k', '--precision-units', default=6, type=int)
     parser.add_argument('-f', '--format', default='%Y-%m-%d %H:%M:%S')
-    parser.add_argument('-u', '--utc', action='store_true')
     parser.add_argument('-v', '--value')
     parser.add_argument('-a', '--amount')
 
