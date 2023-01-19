@@ -26,7 +26,7 @@ really found anyone who's developing such a tool open-source.
 
 The architecture would be something like this:
 
-![General Accounting Tool Architecture](./assets/accounting architecture.png)
+![General Accounting Tool Architecture](assets/accounting architecture.png)
 
 ### Why Open Source?
 
