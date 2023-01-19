@@ -1,3 +1,7 @@
+from enum import Enum
+from decimal import Decimal
+from eth_abi import decode_abi, decode_single
+from collections import namedtuple, defaultdict
 import os
 import dotenv
 import requests
@@ -5,11 +9,9 @@ import json
 import sys
 from toolz import curry
 from toolz.curried import get
-from eth_utils import to_int, decode_hex, event_abi_to_log_topic
-from collections import namedtuple, defaultdict
-from eth_abi import decode_abi, decode_single
-from decimal import Decimal
-from enum import Enum
+from eth_utils import (to_int, decode_hex, event_abi_to_log_topic,
+                       function_signature_to_4byte_selector, to_checksum_address)
+from ens import ENS
 
 
 WAD = Decimal(10 ** 18)
@@ -41,12 +43,19 @@ class SpecialAddress(Enum):
     Fee = 'FEE_RECIPIENT'
 
 
-TRANSFER_EVENTS_ABI = json.loads('[{"anonymous": false, "inputs": [{"indexed": true, "name": "from", "type": "address"}, {"indexed": true, "name": "to", "type": "address"}, {"indexed": false, "name": "amount", "type": "uint256"}], "name": "Transfer", "type": "event"}, {"anonymous": false, "inputs": [{"indexed": true, "internalType": "address", "name": "from", "type": "address"}, {"indexed": true, "internalType": "address", "name": "to", "type": "address"}, {"indexed": true, "internalType": "uint256", "name": "tokenId", "type": "uint256"}], "name": "Transfer", "type": "event"}, {"anonymous": false, "inputs": [{"indexed": true, "internalType": "address", "name": "operator", "type": "address"}, {"indexed": true, "internalType": "address", "name": "from", "type": "address"}, {"indexed": true, "internalType": "address", "name": "to", "type": "address"}, {"indexed": false, "internalType": "uint256[]", "name": "ids", "type": "uint256[]"}, {"indexed": false, "internalType": "uint256[]", "name": "values", "type": "uint256[]"}], "name": "TransferBatch", "type": "event"}, {"anonymous": false, "inputs": [{"indexed": true, "internalType": "address", "name": "operator", "type": "address"}, {"indexed": true, "internalType": "address", "name": "from", "type": "address"}, {"indexed": true, "internalType": "address", "name": "to", "type": "address"}, {"indexed": false, "internalType": "uint256", "name": "id", "type": "uint256"}, {"indexed": false, "internalType": "uint256", "name": "value", "type": "uint256"}], "name": "TransferSingle", "type": "event"}]')
+def get_json(fp):
+    with open(fp, 'r') as f:
+        return json.load(f)
+
+
+TRANSFER_EVENTS_ABI = get_json('./power_bohne/abi/transfers.json')
 
 Transfer = namedtuple(
     'Transfer',
     ['frm', 'to', 'ttype', 'asset_contract', 'sub_id', 'amount']
 )
+
+AccountGroup = namedtuple('AccountGroup', ['name'])
 
 
 def hex_to_int(s: str) -> int:
@@ -116,29 +125,29 @@ def disp_tx_path(node, depth=0, ends=(True,), tx_parse_event=lambda *_: None):
         else:
             value_as_str = ''
         print(
-            f'{indent}({path}) {call_type} {short_addr(frm)} -> {short_addr(to)}{value_as_str}')
-    else:
-        if t == 'log':
-            topics = node['topics']
-            event_data = node['data']
-            event = tx_parse_event(topics, event_data)
-            if event is None or event.name is None or event.args is None:
-                print(f'{indent}({path}) {t} (<Unknown>)')
-                topic_indent = ends_to_indent(ends + (False,))
-                for i, topic in enumerate(topics, start=1):
-                    print(f'{topic_indent}topic {i}: {topic}')
-                data_indent = ends_to_indent(ends + (True,))
-                print(f'{data_indent}data: {event_data}')
-            else:
-                name, args = event
-                print(f'{indent}({path}) {t} ({name})')
-                largest_arg_name = max(map(len, args.keys()))
-                for i, (arg_name, arg_value) in enumerate(args.items(), start=1):
-                    padding = ' ' * (largest_arg_name - len(arg_name))
-                    arg_indent = ends_to_indent(ends + (i == len(args),))
-                    print(f'{arg_indent} {arg_name}:{padding} {arg_value}')
+            f'{indent}({path}) {call_type} {short_addr(to_checksum_address(frm))} -> {short_addr(to_checksum_address(to))}{value_as_str}'
+        )
+    elif t == 'log':
+        topics = node['topics']
+        event_data = node['data']
+        event = tx_parse_event(topics, event_data)
+        if event is None or event.name is None or event.args is None:
+            print(f'{indent}({path}) {t} (<Unknown>)')
+            topic_indent = ends_to_indent(ends + (False,))
+            for i, topic in enumerate(topics, start=1):
+                print(f'{topic_indent}topic {i}: {topic}')
+            data_indent = ends_to_indent(ends + (True,))
+            print(f'{data_indent}data: {event_data}')
         else:
-            print(f'{indent}({path}) {t}')
+            name, args = event
+            print(f'{indent}({path}) {t} ({name})')
+            largest_arg_name = max(map(len, args.keys()))
+            for i, (arg_name, arg_value) in enumerate(args.items(), start=1):
+                padding = ' ' * (largest_arg_name - len(arg_name))
+                arg_indent = ends_to_indent(ends + (i == len(args),))
+                print(f'{arg_indent} {arg_name}:{padding} {arg_value}')
+    else:
+        print(f'{indent}({path}) {t}')
     children = node.get('children', [])
     for i, child_node in enumerate(children, start=1):
         disp_tx_path(
@@ -307,12 +316,40 @@ def get_account_transfers(tx):
     return account_transfers
 
 
-def summarize_transfers(tx):
+def sign_to_str(x):
+    if x > type(x)(0):
+        return '+'
+    if x == type(x)(0):
+        return ' '
+    return ''
+
+
+def disp_addr(tx, addr, ns):
+    if not isinstance(addr, str):
+        return addr
+    data = tx['trace']['result']['addresses'].get(addr)
+    addr = to_checksum_address(addr)
+    name = ns.name(addr)
+    if name is None:
+        full_disp = addr
+    else:
+        full_disp = f'{name} ({short_addr(addr)})'
+    if data is None:
+        return full_disp
+    label = list(data.values())[-1]['label']
+    if not label:
+        return full_disp
+    if name is None:
+        return f'"{label}" ({short_addr(addr)})'
+    return f'{name} ("{label}" {short_addr(addr)})'
+
+
+def summarize_transfers(tx, symbols, w3):
     account_transfers = get_account_transfers(tx)
     for account, transfers in account_transfers.items():
         if isinstance(account, SpecialAddress):
             continue
-        print(f'{account}:')
+        print(f'{disp_addr(tx, account, ENS.fromWeb3(w3))}:')
         balance_changes = defaultdict(int)
         fee_payment = None
         for transfer in transfers:
@@ -326,25 +363,70 @@ def summarize_transfers(tx):
             )
             balance_changes[asset_id] += sign * transfer.amount
         for (asset_contract, ttype, sub_id), change in balance_changes.items():
-            if change == 0:
+            if change == 0 and fee_payment is None:
                 continue
-            p = ' ' if change > 0 else ''
             if ttype == TransferType.ETH:
-                print(f'    {p}{Decimal(change) / WAD:,} ETH')
+                print(f'    {sign_to_str(change)}{Decimal(change) / WAD:,} ETH')
                 if fee_payment is not None:
                     fee = -Decimal(fee_payment.amount)
+                    before_fee = Decimal(change) - fee
                     print(
-                        f'        (WITHOUT FEE) {p}{(Decimal(change) - fee) / WAD:,} ETH'
+                        f'        (WITHOUT FEE) {sign_to_str(before_fee)}{before_fee / WAD:,} ETH'
                     )
                     print(
                         f'        (  TX  FEE  ) {fee / WAD:,} ETH'
                     )
-            elif ttype == TransferType.ERC20:
-                print(f'    {p}{Decimal(change) / WAD:,} ({asset_contract})')
-            elif ttype == TransferType.ERC1155:
-                print(f'    {p}{change:,} ({asset_contract} #{sub_id})')
-            else:  # ERC721
-                print(f'    {p}{change} x #{sub_id} ({asset_contract})')
+            else:
+                asset = symbols.get(
+                    asset_contract,
+                    f'UNKNOWN <{short_addr(to_checksum_address(asset_contract))}>'
+                )
+                if ttype == TransferType.ERC20:
+                    print(
+                        f'    {sign_to_str(change)}{Decimal(change) / WAD:,} {asset}'
+                    )
+                elif ttype == TransferType.ERC1155:
+                    print(
+                        f'    {sign_to_str(change)}{change:,} {asset} #{sub_id}'
+                    )
+                else:  # ERC721
+                    print(
+                        f'    {sign_to_str(change)}{change} x #{sub_id} {asset}'
+                    )
+
+
+def prune_trace_children(node):
+    node['children'] = [
+        prune_trace_children(child)
+        for child in node.get('children', [])
+        if child['type'] in ('call', 'log')
+    ]
+    return node
+
+
+def get_tokens_from_transfers(transfers):
+    return {
+        transfer.asset_contract
+        for transfer in transfers
+        if transfer.ttype in (TransferType.ERC20, TransferType.ERC721)
+    }
+
+
+def get_symbols_from_tx(multicaller, tx):
+    tokens = list(get_tokens_from_transfers(get_tx_transfers(tx)))
+    symbol_selector = function_signature_to_4byte_selector('symbol()')
+    results = multicaller.functions.tryAggregate(False, [
+        {
+            'target': to_checksum_address(token),
+            'callData': symbol_selector
+        }
+        for token in tokens
+    ]).call()
+    return {
+        token: decode_abi(['string'], ret_data)[0]
+        for (success, ret_data), token in zip(results, tokens)
+        if success
+    }
 
 
 if __name__ == '__main__':
@@ -354,16 +436,15 @@ if __name__ == '__main__':
 
     rpc = os.environ.get('LLAMA_RPC_URL')
 
-    with open('./events.json', 'r') as f:
-        event_topic_map = build_topic_map(json.load(f))
+    event_topic_map = build_topic_map(
+        get_json('./power_bohne/abi/base-events.json')
+    )
 
     tx_hash = sys.argv[1]
 
     tx = get_tx(tx_hash, rpc)
-    for addr, addr_data in tx['trace']['result']['addresses'].items():
-        print(f'addr: {addr}')
-        print(json.dumps(addr_data, indent=2))
-        print()
+
+    prune_trace_children(tx['trace']['result']['entrypoint'])
 
     disp_tx_path(
         tx['trace']['result']['entrypoint'],
@@ -372,11 +453,21 @@ if __name__ == '__main__':
 
     # print(json.dumps(tx, indent=2))
 
-    # from web3 import Web3
-    # w3 = Web3(Web3.HTTPProvider(rpc))
-    # b = w3.eth.get_block_number()
+    from web3 import Web3
+    provider = Web3.HTTPProvider(rpc)
+    w3 = Web3(provider)
+
+    multicaller = w3.eth.contract(
+        address='0x5BA1e12693Dc8F9c48aAD8770482f4739bEeD696',
+        abi=get_json('./power_bohne/abi/multicall.json')
+    )
+
+    symbols = get_symbols_from_tx(multicaller, tx)
+
     print('\n')
-    summarize_transfers(tx)
+
+    # b = w3.eth.get_block_number()
+    summarize_transfers(tx, symbols, w3)
 
     # n1 = is_nft(rpc, '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2')
     # n2 = is_nft(rpc, '0xC4638af1e01720C4B5df3Bc8D833db6be85d2211')
