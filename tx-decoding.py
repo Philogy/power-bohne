@@ -55,6 +55,13 @@ Transfer = namedtuple(
     ['frm', 'to', 'ttype', 'asset_contract', 'sub_id', 'amount']
 )
 
+BasicTokenMetadata = namedtuple(
+    'BasicTokenMetadata',
+    ['name', 'symbol', 'decimals', 'ttype']
+)
+
+MultiCall = curry(namedtuple('MultiCall', ['data', 'target']))
+
 AccountGroup = namedtuple('AccountGroup', ['name'])
 
 
@@ -82,7 +89,6 @@ def get_rpc(url, method, *params):
 
 def get_samczsun_trace(tx, chain='ethereum'):
     url = f'https://tx.eth.samczsun.com/api/v1/trace/{chain}/{tx}'
-    # print(f'url: {url}')
     return requests.get(url).json()
 
 
@@ -294,10 +300,6 @@ def get_call_node_transfers(node, current_addr=None):
     node_type = node['type']
     if node_type == 'log':
         topic_map = build_topic_map(TRANSFER_EVENTS_ABI)
-        # print()
-        # for (topic1, topic_count), abi in topic_map.items():
-        #     print(f'({topic1.hex()}, {topic_count}): {abi}')
-        # print()
         event = parse_event(topic_map, node['topics'], node['data'])
         if not (event.name is None or event.args is None):
             yield from event_to_transfers(event, current_addr)
@@ -305,7 +307,8 @@ def get_call_node_transfers(node, current_addr=None):
         if node['variant'] == 'call' and (amount := hex_to_int(node['value'])) != 0:
             yield Transfer(node['from'], node['to'], TransferType.ETH, None, None, amount)
         for child_node in node['children']:
-            yield from get_call_node_transfers(child_node, node['to'])
+            active_addr = current_addr if node['variant'] == 'delegatecall' else node['to']
+            yield from get_call_node_transfers(child_node, active_addr)
 
 
 def get_account_transfers(tx):
@@ -344,12 +347,11 @@ def disp_addr(tx, addr, ns):
     return f'{name} ("{label}" {short_addr(addr)})'
 
 
-def summarize_transfers(tx, symbols, w3):
+def summarize_transfers(tx, tokens, w3):
     account_transfers = get_account_transfers(tx)
     for account, transfers in account_transfers.items():
         if isinstance(account, SpecialAddress):
             continue
-        print(f'{disp_addr(tx, account, ENS.fromWeb3(w3))}:')
         balance_changes = defaultdict(int)
         fee_payment = None
         for transfer in transfers:
@@ -362,6 +364,10 @@ def summarize_transfers(tx, symbols, w3):
                 transfer.sub_id
             )
             balance_changes[asset_id] += sign * transfer.amount
+        has_change = any(
+            change != 0 for change in balance_changes.values()) or fee_payment is not None
+        if has_change:
+            print(f'{disp_addr(tx, account, ENS.fromWeb3(w3))}:')
         for (asset_contract, ttype, sub_id), change in balance_changes.items():
             if change == 0 and fee_payment is None:
                 continue
@@ -377,21 +383,28 @@ def summarize_transfers(tx, symbols, w3):
                         f'        (  TX  FEE  ) {fee / WAD:,} ETH'
                     )
             else:
-                asset = symbols.get(
+                token = tokens.get(
                     asset_contract,
-                    f'UNKNOWN <{short_addr(to_checksum_address(asset_contract))}>'
+                    BasicTokenMetadata(None, None, None, None)
                 )
+                symbol = token.symbol
+                if symbol is None:
+                    symbol = f'UNKNOWN <{short_addr(to_checksum_address(asset_contract))}>'
+                if token.decimals is None:
+                    token_wad = Decimal(1)
+                else:
+                    token_wad = Decimal(10 ** token.decimals)
                 if ttype == TransferType.ERC20:
                     print(
-                        f'    {sign_to_str(change)}{Decimal(change) / WAD:,} {asset}'
+                        f'    {sign_to_str(change)}{Decimal(change) / token_wad:,} {symbol}'
                     )
                 elif ttype == TransferType.ERC1155:
                     print(
-                        f'    {sign_to_str(change)}{change:,} {asset} #{sub_id}'
+                        f'    {sign_to_str(change)}{change:,} {symbol} #{sub_id}'
                     )
                 else:  # ERC721
                     print(
-                        f'    {sign_to_str(change)}{change} x #{sub_id} {asset}'
+                        f'    {sign_to_str(change)}{change} x #{sub_id} {symbol}'
                     )
 
 
@@ -405,27 +418,85 @@ def prune_trace_children(node):
 
 
 def get_tokens_from_transfers(transfers):
+    '''
+    Returns dict of token_addr => TransferType.ERC20 | TransferType.ERC721
+    '''
     return {
-        transfer.asset_contract
+        transfer.asset_contract: transfer.ttype
         for transfer in transfers
         if transfer.ttype in (TransferType.ERC20, TransferType.ERC721)
     }
 
 
-def get_symbols_from_tx(multicaller, tx):
-    tokens = list(get_tokens_from_transfers(get_tx_transfers(tx)))
-    symbol_selector = function_signature_to_4byte_selector('symbol()')
-    results = multicaller.functions.tryAggregate(False, [
-        {
-            'target': to_checksum_address(token),
-            'callData': symbol_selector
-        }
-        for token in tokens
-    ]).call()
+def decode_results(keys, types, results):
     return {
-        token: decode_abi(['string'], ret_data)[0]
-        for (success, ret_data), token in zip(results, tokens)
+        key: decode_abi(types, ret_data)
+        for (success, ret_data), key in zip(results, keys)
         if success
+    }
+
+
+def multicall_flatten_batches(multicaller, *batches):
+    flattened_batches = []
+    sizes = []
+    for batch in batches:
+        batch = list(batch)
+        prepped_batch = [
+            {
+                'target': to_checksum_address(multi_call.target),
+                'callData': multi_call.data
+            }
+            for multi_call in batch
+        ]
+        flattened_batches += prepped_batch
+        sizes.append(len(prepped_batch))
+    flat_results = multicaller.functions.tryAggregate(
+        False, flattened_batches
+    ).call()
+    batch_results = tuple()
+    size_i = 0
+    batch_sub_i = 0
+    for result in flat_results:
+        while batch_sub_i >= sizes[size_i]:
+            size_i += 1
+            batch_sub_i = 0
+        if batch_sub_i == 0:
+            batch_results += ([],)
+        batch_results[-1].append(result)
+        batch_sub_i += 1
+    return batch_results
+
+
+def get_basic_token_metadata_from_tx(multicaller, tx):
+    all_tokens = get_tokens_from_transfers(get_tx_transfers(tx))
+    erc20_tokens = [token for token, ttype in all_tokens.items()]
+    name_results, symbol_results, decimal_results = multicall_flatten_batches(
+        multicaller,
+        map(
+            MultiCall(function_signature_to_4byte_selector('name()')),
+            all_tokens.keys()
+        ),
+        map(
+            MultiCall(function_signature_to_4byte_selector('symbol()')),
+            all_tokens.keys()
+        ),
+        map(
+            MultiCall(function_signature_to_4byte_selector('decimals()')),
+            erc20_tokens
+        )
+    )
+    names = decode_results(all_tokens.keys(), ['string'], name_results)
+    symbols = decode_results(all_tokens.keys(), ['string'], symbol_results)
+    decimals = decode_results(erc20_tokens, ['uint8'], decimal_results)
+
+    return {
+        token: BasicTokenMetadata(
+            names.get(token, (None,))[0],
+            symbols.get(token, (None,))[0],
+            decimals.get(token, (None,))[0],
+            ttype
+        )
+        for token, ttype in all_tokens.items()
     }
 
 
@@ -451,8 +522,6 @@ if __name__ == '__main__':
         tx_parse_event=parse_event(event_topic_map)
     )
 
-    # print(json.dumps(tx, indent=2))
-
     from web3 import Web3
     provider = Web3.HTTPProvider(rpc)
     w3 = Web3(provider)
@@ -462,12 +531,13 @@ if __name__ == '__main__':
         abi=get_json('./power_bohne/abi/multicall.json')
     )
 
-    symbols = get_symbols_from_tx(multicaller, tx)
+    # symbols = get_symbols_from_tx(multicaller, tx)
+    tokens = get_basic_token_metadata_from_tx(multicaller, tx)
 
     print('\n')
 
     # b = w3.eth.get_block_number()
-    summarize_transfers(tx, symbols, w3)
+    summarize_transfers(tx, tokens, w3)
 
     # n1 = is_nft(rpc, '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2')
     # n2 = is_nft(rpc, '0xC4638af1e01720C4B5df3Bc8D833db6be85d2211')
