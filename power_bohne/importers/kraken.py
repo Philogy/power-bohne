@@ -285,9 +285,6 @@ class Importer(ImporterProtocol):
 
         missed_types = Counter()
 
-        if missed_types:
-            pass
-
         for refid, transfers in transactions_by_ref:
             if refid in self.explicit_ignore:
                 self.logger.debug(f'Skipping {refid}')
