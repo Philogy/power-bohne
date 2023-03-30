@@ -1,11 +1,10 @@
-import re
 import json
 import requests
 from decimal import Decimal
 from datetime import datetime
 from .prices_utils import Price, get_lin_avg_price
 
-COINGECKO_BASE = 'https://api.coingecko.com/api/'
+COINGECKO_BASE = 'https://api.coingecko.com/api'
 
 
 def get(endpoint, params={}, parse_int=None, **kwarg_params):
@@ -47,7 +46,7 @@ def get_price_over_range(coin_id, vs_currency, start, end):
     ]
 
 
-HISTORIC_LIN_RADIUS = 5 * 24 * 60 * 60
+HISTORIC_LIN_RADIUS = 12 * 60 * 60
 
 
 def get_historic_lin_avg_price(coin_id, vs_currency, time):

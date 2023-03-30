@@ -152,8 +152,20 @@ def disp_tx_path(node, depth=0, ends=(True,), tx_parse_event=lambda *_: None):
                 padding = ' ' * (largest_arg_name - len(arg_name))
                 arg_indent = ends_to_indent(ends + (i == len(args),))
                 print(f'{arg_indent} {arg_name}:{padding} {arg_value}')
+    elif t == 'sload':
+        slot = int(node['slot'][2:], 16)
+        value = node['value']
+        print(f'{indent}({path}) {t} [0x{slot:x}] => {value}')
+    elif t == 'sstore':
+        slot = int(node['slot'][2:], 16)
+        prev_value = node['oldValue']
+        new_value = node['newValue']
+        print(
+            f'{indent}({path}) {t} [0x{slot:x}] {prev_value} --> {new_value}'
+        )
     else:
         print(f'{indent}({path}) {t}')
+
     children = node.get('children', [])
     for i, child_node in enumerate(children, start=1):
         disp_tx_path(
@@ -450,19 +462,18 @@ def multicall_flatten_batches(multicaller, *batches):
         ]
         flattened_batches += prepped_batch
         sizes.append(len(prepped_batch))
+    print(f'flattened_batches: {flattened_batches}')
     flat_results = multicaller.functions.tryAggregate(
         False, flattened_batches
     ).call()
-    batch_results = tuple()
+    batch_results = tuple([] for _ in sizes)
     size_i = 0
     batch_sub_i = 0
     for result in flat_results:
         while batch_sub_i >= sizes[size_i]:
             size_i += 1
             batch_sub_i = 0
-        if batch_sub_i == 0:
-            batch_results += ([],)
-        batch_results[-1].append(result)
+        batch_results[size_i].append(result)
         batch_sub_i += 1
     return batch_results
 
@@ -515,7 +526,7 @@ if __name__ == '__main__':
 
     tx = get_tx(tx_hash, rpc)
 
-    prune_trace_children(tx['trace']['result']['entrypoint'])
+    # prune_trace_children(tx['trace']['result']['entrypoint'])
 
     disp_tx_path(
         tx['trace']['result']['entrypoint'],

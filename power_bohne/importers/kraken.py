@@ -35,7 +35,10 @@ KRAKEN_ASSET_REMAP = {
     'ETHW': 'ETHW',
     'DAI': 'DAI',
     'ZEUR': 'EUR',
-    'LUNA2': 'LUNA2'
+    'LUNA2': 'LUNA2',
+    'NANO': 'NANO',
+    'XXDG': 'DOGE',
+    'LUNA': 'LUNA'
 }
 
 
@@ -106,7 +109,7 @@ class Importer(ImporterProtocol):
     def __parse_kraken_asset(self, kraken_asset):
         if (asset := KRAKEN_ASSET_REMAP.get(kraken_asset)) is None:
             self.unrecognized_assets[kraken_asset] += 1
-            return None
+            return kraken_asset
         return asset
 
     def __get_deposit_postings(self, deposit, meta):
@@ -274,7 +277,6 @@ class Importer(ImporterProtocol):
         )
 
     def extract(self, file, _=None) -> list:
-        self.unrecognized_assets = defaultdict(int)
 
         with open(file.name, 'r', encoding='utf-8') as _file:
             transactions = list(csv.DictReader(_file))

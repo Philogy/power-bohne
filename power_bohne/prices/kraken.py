@@ -33,6 +33,9 @@ def get_trades(pair, since=None):
         'pair': pair,
         'since': since
     }).json()
+    if 'result' not in raw_res:
+        print(f'pair: {pair}')
+        print(f'raw_res: {raw_res}')
     results = next(iter(raw_res['result'].values()))
     return [
         {

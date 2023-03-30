@@ -9,7 +9,8 @@ class AssetType(Enum):
 
 FIAT_TICKERS = {'EUR', 'USD', 'GBP'}
 STABLE_TICKERS = {'UST', 'USDT', 'USDC', 'DAI', 'RAI', 'BUSD'}
-CRYPTO_TICKERS = {'XMR', 'ETH', 'LTC', 'XRP', 'ETHW', 'LUNA2'}
+CRYPTO_TICKERS = {'XMR', 'ETH', 'LTC', 'XRP',
+                  'ETHW', 'LUNA2', 'NANO', 'LUNA', 'DOGE'}
 
 ASSET_TYPES = {
     **{fiat: AssetType.FIAT for fiat in FIAT_TICKERS},
