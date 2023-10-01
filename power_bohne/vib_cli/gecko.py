@@ -55,6 +55,6 @@ def gecko_cmd(args):
 
 gecko = Command(
     'gecko',
-    dict(),
+    [],
     CoreCommand(add_gecko_parser, gecko_cmd)
 )

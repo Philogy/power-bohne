@@ -1,12 +1,20 @@
 import re
 from collections import namedtuple
+from typing import NamedTuple
 
 import pytz
 from datetime import datetime
 from dateutil import parser as dateutil_parser
 
-Command = namedtuple('Command', ['name', 'aliases', 'core_command'])
 CoreCommand = namedtuple('CoreCommand', ['parser_add', 'command_fn'])
+Command = NamedTuple(
+    'Command',
+    [
+        ('name', str),
+        ('aliases', list[str]),
+        ('core_command', CoreCommand)
+    ]
+)
 
 
 def parse_time(raw_time: str) -> datetime:

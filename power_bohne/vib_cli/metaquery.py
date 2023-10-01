@@ -102,6 +102,6 @@ def add_meta_query_parser(parser):
 
 metaquery = Command(
     'metaquery',
-    {'mq': 'metaquery'},
+    ['mq'],
     CoreCommand(add_meta_query_parser, meta_query)
 )

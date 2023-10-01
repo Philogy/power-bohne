@@ -2,16 +2,19 @@ import argparse
 from collections import defaultdict
 from .metaquery import metaquery
 from .gecko import gecko
+from .billvoice import billvoice
 
+CMDS = [metaquery, gecko, billvoice]
 
 COMMAND_ALIASES = {
-    **metaquery.aliases,
-    **gecko.aliases
+    alias: cmd.name
+    for cmd in CMDS
+    for alias in cmd.aliases
 }
 
 COMMANDS = {
-    metaquery.name: metaquery.core_command,
-    gecko.name: gecko.core_command
+    cmd.name: cmd.core_command
+    for cmd in CMDS
     # 'eth-tx': Command(add_evm_transaction_parser, parse_eth_scan_export)
 }
 
