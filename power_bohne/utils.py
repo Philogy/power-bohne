@@ -1,5 +1,7 @@
 import os
 import json
+from typing import Any, Optional
+from contextlib import contextmanager
 from beancount.core.data import Open, Transaction as _Transaction
 from beancount.core.number import D, Decimal
 
@@ -45,13 +47,44 @@ def get_account_booking_methods(entries):
 
 
 class PluginError(Exception):
-    def __init__(self, message, filename, lineno=0, entry=None, extended_source=None):
-        if extended_source is None:
-            extended_source = dict()
+
+    def __init__(self, message: str, filename: str, lineno: int = 0, entry: Optional[Any] = None):
         super().__init__(self, message)
-        self.source = {'filename': filename, 'lineno': lineno}
         self.message = message
         self.entry = entry
+        self.source = {'filename': filename, 'lineno': lineno}
+
+    @classmethod
+    @contextmanager
+    def capture_assert(
+        cls,
+        error_out: list['PluginError'],
+        entry: Optional[Any] = None,
+        filename: Optional[str] = None,
+        lineno: Optional[int] = None
+    ):
+        current_filename: Optional[str] = None
+        current_lineno: Optional[int] = None
+        if entry is not None:
+            current_filename = entry.meta['filename']
+            current_lineno = entry.meta['lineno']
+        if filename is not None:
+            current_filename = filename
+        if lineno is not None:
+            current_lineno = lineno
+        assert isinstance(current_filename, str)
+        assert isinstance(current_lineno, int), \
+            f'Expected lineno to be int instead got {current_lineno!r} ({type(current_lineno)})'
+
+        try:
+            yield
+        except AssertionError as e:
+            error_out.append(PluginError(
+                e.args[0],
+                current_filename,
+                current_lineno,
+                entry
+            ))
 
 
 class FileCache:
